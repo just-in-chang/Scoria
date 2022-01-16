@@ -3,7 +3,7 @@ use std::fs::create_dir_all;
 
 use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
 
-use scoria::msg::{ScoreResponse, ExecuteMsg, QueryMsg};
+use scoria::msg::{ExecuteMsg, QueryMsg, ScoreResponse};
 use scoria::state::State;
 
 fn main() {

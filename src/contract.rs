@@ -1,6 +1,6 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{Deps, DepsMut, Env, MessageInfo, Response, StdResult};
+use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult};
 use cw2::set_contract_version;
 
 use cosmwasm_std::Addr;
@@ -14,7 +14,12 @@ const CONTRACT_VERSION: &str = "1";
 
 /// Instantiation function for the smart contract and saves the creator's address as the owner in the contract's state.
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn instantiate(deps: DepsMut, _env: Env, info: MessageInfo) -> Result<Response, ContractError> {
+pub fn instantiate(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    _: u32,
+) -> Result<Response, ContractError> {
     // Sets the owner of the state
     let state = State {
         owner: info.sender.clone(),
@@ -65,36 +70,36 @@ pub fn try_update_score(
 
 /// Query function to obtain the score of an address
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> Result<ScoreResponse, ContractError> {
+pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> Result<Binary, ContractError> {
     match msg {
-        QueryMsg::GetScore { address } => query_score(deps, address),
+        QueryMsg::GetScore { address } => {
+            if SCORES.has(deps.storage, &address) {
+                let score: ScoreResponse = ScoreResponse {
+                    score: SCORES.load(deps.storage, &address).unwrap(),
+                };
+                match to_binary(&score) {
+                    Ok(x) => return Ok(x),
+                    _ => return Err(ContractError::AddressNotFound {}),
+                }
+            }
+            Err(ContractError::AddressNotFound {})
+        }
     }
-}
-
-/// Determines whether or not a score exists for an address and returns its score
-fn query_score(deps: Deps, addr: Addr) -> Result<ScoreResponse, ContractError> {
-    if SCORES.has(deps.storage, &addr) {
-        return Ok(ScoreResponse {
-            score: SCORES.load(deps.storage, &addr).unwrap(),
-        });
-    }
-
-    return Err(ContractError::AddressNotFound {});
 }
 
 /// Tests
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::coins;
     use cosmwasm_std::testing::{mock_dependencies_with_balance, mock_env, mock_info};
+    use cosmwasm_std::{coins, from_binary};
 
     /// Tests proper initialization of smart contract
     #[test]
     fn proper_initialization() {
         let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
         let info = mock_info("creator", &coins(1000, "token"));
-        let res = instantiate(deps.as_mut(), mock_env(), info).unwrap();
+        let res = instantiate(deps.as_mut(), mock_env(), info, 0).unwrap();
         assert_eq!(0, res.messages.len());
     }
 
@@ -103,7 +108,7 @@ mod tests {
     fn update_and_query() {
         let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
         let info = mock_info("creator", &coins(2, "token"));
-        let _res = instantiate(deps.as_mut(), mock_env(), info.clone()).unwrap();
+        let _res = instantiate(deps.as_mut(), mock_env(), info.clone(), 0).unwrap();
 
         // Assigns the owner's address a score of 3
         let msg = ExecuteMsg::UpdateScore {
@@ -119,9 +124,14 @@ mod tests {
             QueryMsg::GetScore {
                 address: info.clone().sender,
             },
-        )
-        .unwrap();
-        assert_eq!(3, res.score);
+        );
+        match res {
+            Ok(x) => {
+                let score: ScoreResponse = from_binary(&x).unwrap();
+                assert_eq!(3, score.score)
+            }
+            _ => panic!("Must verify score"),
+        }
     }
 
     /// Tests an unsuccessful updating of the score of an address
@@ -130,7 +140,7 @@ mod tests {
         let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
         let info = mock_info("creator", &coins(2, "token"));
         let bad_guy = mock_info("crook", &coins(2, "token"));
-        let _res = instantiate(deps.as_mut(), mock_env(), info.clone()).unwrap();
+        let _res = instantiate(deps.as_mut(), mock_env(), info.clone(), 0).unwrap();
 
         // Attempts (fails) to assign the bad guy's address a score of 9999999
         let msg = ExecuteMsg::UpdateScore {
@@ -149,7 +159,7 @@ mod tests {
     fn fail_to_find() {
         let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
         let info = mock_info("creator", &coins(2, "token"));
-        let _res = instantiate(deps.as_mut(), mock_env(), info.clone()).unwrap();
+        let _res = instantiate(deps.as_mut(), mock_env(), info.clone(), 0).unwrap();
 
         // Queries the (nonexistent) score of the owner
         let res = query(
